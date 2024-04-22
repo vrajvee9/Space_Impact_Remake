@@ -61,7 +61,7 @@ function setup() {
   // initialising game variables
   lives = 3; // player lives
   shieldCount = 3; // number of shields available
-  bossHitCount = 150; // number of hits required to defeat boss
+  bossHitCount = 50; // number of hits required to defeat boss
 
   // setting field dimensions
   fieldX = 0;
@@ -312,7 +312,7 @@ function keyPressed() {
       // reset player lives, shield count, and boss hit count
       lives = 3;
       shieldCount = 3;
-      bossHitCount = 150;
+      bossHitCount = 50;
       // start the game again
       startGame();
       return; // exit the function
