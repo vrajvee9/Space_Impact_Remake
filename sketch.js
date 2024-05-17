@@ -13,6 +13,7 @@ let floorPos_y;
 
 // scrolling position
 let scrollPos_x;
+let scrollPos_x_BG;
 
 // game character position in the world
 let gameChar_world_x;
@@ -27,6 +28,7 @@ let lives;
 let boss;
 let bossHitCount;
 let shootingInterval;
+let scoreCount;
 
 // arrays for game elements
 let enemies;
@@ -37,20 +39,24 @@ let mountains;
 let bullets;
 
 // shield variables
-let shieldActive = false;
-let shieldDuration = 3000; // shield duration in milliseconds
 let shieldStartTime; 
 let shieldX, shieldY; // shield position
+let shieldActive = false;
+let shieldDuration = 4000; // shield duration in milliseconds
 let shieldCount = 3; // number of shields available
 
 // game state variables
-let gameStarted = false;  
-let gameWon;  
+let gameStarted;  
+let isPaused;  
+let won;  
+
+// --------------------------------------------------------------------------------------------------
+// -----------------------------------SETUP, PRELOAD AND DRAW----------------------------------------
+// --------------------------------------------------------------------------------------------------
 
 // function to preload background image
 function preload() {
-  // Attempt to load the image
-  backgroundImage = loadImage("Space Background.png") 
+  backgroundImage = loadImage("Space Background (3).png") //
 }
 
 // function to set up the initial state of the game
@@ -61,7 +67,8 @@ function setup() {
   // initialising game variables
   lives = 3; // player lives
   shieldCount = 3; // number of shields available
-  bossHitCount = 50; // number of hits required to defeat boss
+  scoreCount = 0; // variable to keep a count of score
+  bossHitCount = 50; // every bullet shot by the player decrements this number by 1
 
   // setting field dimensions
   fieldX = 0;
@@ -74,22 +81,24 @@ function setup() {
 }
 
 function draw() {
-  // background color
-  background("black");
+  background("black"); // background color
 
   // fill and stroke color for the elements
   fill('white');
   stroke('white');
 
-
-  // update scroll position
-  scrollPos_x += 5;
+  // update scroll position if the game is not paused
+  if (!isPaused){
+    scrollPos_x += 5;
+  }
+  scrollPos_x_BG += 5; // parallax effect for ONLY the background 
 
   // check if the game has started
   if (!gameStarted) {
     // to display the start screen before starting the game
-    drawStartScreen();
-  } else {
+    gameStart();
+  } 
+  else {
     // move the game character towards the right side of the canvas
     // until a fix point, at which the character can only move up and down
     if (gameChar_x < windowWidth * 0.15) {
@@ -98,11 +107,11 @@ function draw() {
     
     // translate canvas to create parallax effect
     push();
-    translate(-scrollPos_x, 0);
+    translate(-scrollPos_x_BG, 0);
     // draw background images with parallax effect
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 100; i++) {
       image(backgroundImage, fieldX + i * fieldW, fieldY, fieldW, fieldH);
-    }
+    } 
     pop();
 
     // set speed for character movement
@@ -119,7 +128,7 @@ function draw() {
     }
 
     // draw the game character
-    drawPlayableCharacter(gameChar_x, gameChar_y, 7);
+    drawPlayer(gameChar_x, gameChar_y, 7);
 
     // draw player lives 
     for (let i = 0; i < lives; i++) {
@@ -130,35 +139,45 @@ function draw() {
     // if so, then game is over
     if (lives < 1) {
       gameOver();
-      startGame();
       return;
     }
+
+    // function to display the game score
+    displayScore();
 
     // calculate and maintain game character's position in the world
     gameChar_world_x = gameChar_x - scrollPos_x;
 
     // iterate over bullets array and handle collisions
+    // Clear bullets array if the boss is about to appear
+    if ((scrollPos_x >= 5000 && scrollPos_x <= 6100) && bullets.length > 0) {
+      bullets = [];
+    }
+
+    // Main game loop for processing bullets
     for (let i = bullets.length - 1; i >= 0; i--) {
       if (bullets[i]) {
-        if (bullets[i].x < windowWidth - 200) {
+        if (bullets[i].x < windowWidth - 400) {
           bullets[i].move();
           bullets[i].display();
         }
-    
-        // check for collision with enemies and remove bullets and enemies accordingly
-        for (let j = 0; j < enemies.length; j++) {
+
+        // Check for collision with enemies and remove bullets and enemies accordingly
+        for (let j = enemies.length - 1; j >= 0; j--) {
           if (enemies[j] && bullets[i].checkCollision(enemies[j])) {
-            bullets.splice(i, 1);
+            bullets.splice(i, 3);
             enemies.splice(j, 1);
+            scoreCount += 5;
             break;
           }
         }
-    
-        // check for collision with boss and reduce boss hit count
-        if (boss && scrollPos_x >= 4200) {
+
+        // Check for bullet collision with boss and reduce boss hit count
+        if (boss && scrollPos_x >= 6800) {
           if (bullets[i].checkCollision(boss)) {
             bullets.splice(i, 1);
             bossHitCount--;
+            scoreCount += 10;
           }
         }
       }
@@ -166,8 +185,14 @@ function draw() {
 
     // check if the boss hit count is zero and display the game won screen
     if (bossHitCount < 1) {
-      gamewon = true;
-      drawGameWonScreen();
+      won = true;
+      gameWon();
+      return;
+    }
+
+    // conditional to check if the player has paused the game using the 'Esc' key
+    if (isPaused){
+      gamePause();
       return;
     }
 
@@ -176,7 +201,7 @@ function draw() {
       if (enemies[m]) {
         enemies[m].move(gameChar_world_x, gameChar_y);
         enemies[m].display();
-        enemies[m].shoot();
+        enemies[m].shoot(); // allows the enemies to shoot
 
         // check for contact with player character and reduce lives if not shielded
         if (enemies[m].checkContact(gameChar_x + 117, gameChar_y + 25) && !shieldActive && lives != 0) {
@@ -192,6 +217,14 @@ function draw() {
     shield.count();
     if (shieldActive && millis() - shieldStartTime < shieldDuration) {
       shield.display();
+      // to calculate remaining time for shield
+      let remainingTime = shieldDuration - (millis() - shieldStartTime);
+      let secondsRemaining = ceil(remainingTime / 1000); // to convert milliseconds to seconds and round up
+      // to display remaining time as text
+      fill(255);
+      textSize(30);
+      textAlign(CENTER);
+      text("Shield Active: " + secondsRemaining + " seconds", fieldW / 2 - 50, fieldY + 45);
     } else {
       shieldActive = false; // deactivate the shield if the duration has elapsed
     }
@@ -199,7 +232,7 @@ function draw() {
     // draw platform background
     platformX = 0 - scrollPos_x;
     let bg = new drawPlatform();
-    bg.platform(-scrollPos_x, fieldH + 10, windowWidth + scrollPos_x, 40);
+    bg.platform(-scrollPos_x, fieldH + 30, windowWidth + scrollPos_x, 20);
 
     // draw trees, flowers, and mountains
     for (let i = 0; i < 40; i++) {
@@ -210,24 +243,35 @@ function draw() {
     }
 
     // display boss if scroll position reaches a certain point
-    if (scrollPos_x >= 3500) {
+    if (scrollPos_x >= 5000) {
       boss.display();
       boss.enter();
     }
-    if (scrollPos_x >= 4200) {
+    if (scrollPos_x >= 6900) {
       boss.shoot(); 
     }
   }
 }
 
+
+
+
+
+// --------------------------------------------------------------------------------------------------
+// --------------------------------------GAME STATES-------------------------------------------------
+// --------------------------------------------------------------------------------------------------
+
 // function to draw the game start screen with the game play instructions 
-function drawStartScreen() {
+function gameStart() {
   push();
-  translate(-scrollPos_x, 0);
+  translate(-scrollPos_x_BG, 0);
   for (let i = 0; i < 100; i++) {
     image(backgroundImage, fieldX + i * fieldW, fieldY, fieldW, fieldH);
   }
   pop();
+
+  let w = width/2;
+  let h = height/2;
 
   textAlign(CENTER);
   textSize(100);
@@ -239,114 +283,43 @@ function drawStartScreen() {
   text("Press ENTER to Start", width / 2, height / 2 - 80);
   // the game play instructions 
   textSize(30);
-  rect(width/2 - 150, height/2 + 35, 42, 35) // left key
-  rect(width/2 - 150, height/2 + 100, 42, 35) // right key
-  rect(width/2 - 210, height/2 + 165, 125, 35) // space key 
+  rect(w - 150, h + 35, 42, 35) // left key
+  rect(w - 150, h + 100, 42, 35) // right key
+  rect(w - 180, h + 230, 70, 35) // Esc key
+  rect(w - 210, h + 165, 125, 35) // space key 
   fill('darkgrey')
   noStroke()
   // left square key shadow
-  rect(width/2 - 110, height/2 + 35, 10, 45)
-  rect(width/2 - 150, height/2 + 70, 42, 10)
+  rect(w - 110, h + 35, 10, 45)
+  rect(w - 150, h + 70, 42, 10)
   // right square key shadow
-  rect(width/2 - 110, height/2 + 100, 10, 45)
-  rect(width/2 - 150, height/2 + 135, 46, 10)
+  rect(w - 110, h + 100, 10, 45)
+  rect(w - 150, h + 135, 46, 10)
+  // Esc square key shadow
+  rect(w - 110, h + 230, 10, 45)
+  rect(w - 180, h + 265, 70, 10)
   // space key shadow
-  rect(width/2 - 85, height/2 + 165, 10, 45)
-  rect(width/2 - 210, height/2 + 200, 125, 10)
+  rect(w - 85, h + 165, 10, 45)
+  rect(w - 210, h + 200, 125, 10)
+
   fill('black')
   stroke('black')
   text("Space", width / 2 - 145, height / 2 + 190);
   text("←" , width / 2 - 130, height / 2 + 60);
   text("→", width / 2 - 130, height / 2 + 125);
+  text("Esc", width / 2 - 145, height / 2 + 258);
   fill('white')
   stroke('white')
   text(" :    to shoot", width / 2 + 30, height / 2 + 195);
   text(" :    to move up" , width / 2 + 50, height / 2 + 60);
   text(" :    to move down", width / 2 + 70, height / 2 + 125);
-}
-
-let isShieldKeyPressed = false;
-
-// function to handle key press events
-function keyPressed() {
-  // check if the left arrow key or 'A' key is pressed
-  if (keyCode == 37 || keyCode == 65) {
-    isLeft = true;
-  }
-
-  // check if the right arrow key or 'D' key is pressed
-  if (keyCode == 39 || keyCode == 68) {
-    isRight = true;
-  }
-
-  // check if the 'Space' key is pressed for shooting
-  if (keyCode == 32) {
-    isShoot = true;
-    if (!shootingInterval) {
-      shootBullet();
-      // interval for continuous shooting
-      shootingInterval = setInterval(shootBullet, 200);
-    }
-  }
-
-
-  // check if the 'S' key is pressed to activate shield
-  if (keyCode == 83 && !shieldActive && shieldCount > 0) {
-    shieldActive = true;
-    shieldStartTime = millis(); // record the time when the shield was activated
-    // set the position of the shield relative to the character
-    shieldX = gameChar_x; 
-    shieldY = gameChar_y;
-    // decrement shield count
-    shieldCount--;
-  }
-
-  // check if the 'Enter' key is pressed to start or restart the game
-  if (keyCode == 13) {
-    // ff the game hasn't started yet, start the game
-    if (!gameStarted) {
-      gameStarted = true;
-    }
-    // if the game has ended or the player wants to restart, reset game state
-    else if (lives < 1 || gamewon) {
-      // reset player lives, shield count, and boss hit count
-      lives = 3;
-      shieldCount = 3;
-      bossHitCount = 50;
-      // start the game again
-      startGame();
-      return; // exit the function
-    }
-  }
-}
-
-// function to handle key release events
-function keyReleased() {
-  // check if the left arrow key or 'A' key is released
-  if (keyCode == 37 || keyCode == 65) {
-    isLeft = false;
-  }
-  // check if the right arrow key or 'D' key is released
-  if (keyCode == 39 || keyCode == 68) {
-    isRight = false;
-  }
-  // check if the 'Space' key is released
-  if (keyCode == 32) {
-    isShoot = false;
-    // when spacebar is released, stop continuous shooting
-    clearInterval(shootingInterval);
-    shootingInterval = null; // reset shootingInterval variable
-  }
-  // check if the 'S' key is released
-  if (keyCode == 83) {
-    isShieldKeyPressed = false;
-  }
+  text("  :    to pause", width / 2 + 30, height / 2 + 260);
 }
 
 // function to draw the game won screen
-function drawGameWonScreen() {
+function gameWon() {
   push();
-  translate(-scrollPos_x, 0);
+  translate(-scrollPos_x_BG, 0);
   for (let i = 0; i < 100; i++) {
     image(backgroundImage, fieldX + i * fieldW, fieldY, fieldW, fieldH);
   }
@@ -356,14 +329,106 @@ function drawGameWonScreen() {
   textSize(100);
   fill('white');
   // the game won message
-  text("You Won!", width / 2, height / 2 - 40);
+  text("You Won!", windowWidth / 2, windowHeight / 2 - 40);
   textSize(25);
   // the instruction to play again
-  text("Press Enter to Play Again", width / 2, height / 2 + 40);
+  text("Press Enter to Play Again", windowWidth / 2, windowHeight / 2 + 40);
+  text("Final Score: " + scoreCount, windowWidth / 2, windowHeight / 2 + 100);
 }
 
+// function to write pixelated game over phrase
+function gameOver() {
+  let x = windowWidth/2 - windowWidth*.16;
+  let y = windowHeight / 3.5;
+  let size = 20;
+
+  // letter G
+  rect(x, y, size * 4, size);
+  rect(x - size, y + size, size, size * 4);
+  rect(x, y + size * 5, size * 4, size);
+  rect(x + size * 3, y + size * 3, size, size * 3);
+  rect(x + size, y + size * 3, size * 2, size);
+
+  // letter A
+  rect(x + 110, y + size, size, size * 5);
+  rect(x + 110 + size, y, size * 4, size);
+  rect(x + 110 + size * 4, y + size, size, size * 5);
+  rect(x + 110 + size, y + size * 3, size * 4, size);
+
+  // letter M
+  rect(x + 240, y, size, size * 6);
+  rect(x + 240 + size * 2, y + size * 2, size, size);
+  rect(x + 240 + size, y + size, size, size);
+  rect(x + 240 + size * 3, y + size * 3, size, size);
+  rect(x + 240 + size * 4, y + size * 2, size, size);
+  rect(x + 240 + size * 5, y + size, size, size);
+  rect(x + 240 + size * 6, y, size, size * 6);
+
+  // letter E
+  rect(x + 410, y, size + size * 4, size);
+  rect(x + 410, y + size * 5, size + size * 4, size);
+  rect(x + 410, y + size * 3, size + size * 4, size);
+  rect(x + 410, y, size, size + size * 4);
+
+  y = y + size * 8;
+
+  // letter O
+  rect(x - size, y, size + size * 3, size);
+  rect(x - size, y, size, size + size * 4);
+  rect(x, y + size * 5, size + size * 3, size);
+  rect(x + size * 3, y + size, size, size + size * 4);
+
+  // letter V
+  rect(x + 110, y, size, size + size * 2);
+  rect(x + 110 + size, y + size * 2, size, size);
+  rect(x + 110 + size, y + size * 4, size + size * 2, size);
+  rect(x + 110 + size, y + size * 3, size, size);
+  rect(x + 110 + size * 3, y + size * 3, size, size);
+  rect(x + 110 + size * 3, y + size * 2, size + size, size);
+  rect(x + 110 + size * 4, y, size, size + size * 2);
+  rect(x + 110 + size * 2, y + size * 5, size, size);
+
+  // letter E
+  rect(x + 255, y, size + size * 4, size);
+  rect(x + 255, y + size * 5, size + size * 4, size);
+  rect(x + 255, y + size * 3, size + size * 4, size);
+  rect(x + 255, y, size, size + size * 4);
+
+  // letter R
+  rect(x + 410, y, size, size + size * 5);
+  rect(x + 410, y, size + size * 3, size);
+  rect(x + 410, y + size * 3, size + size * 4, size);
+  rect(x + 410 + size * 4, y + size, size, size + size * 2);
+  rect(x + 410 + size * 3, y + size * 4, size, size);
+  rect(x + 410 + size * 4, y + size * 5, size, size);
+  
+  // instruction for restarting the game
+  fill('white');
+  textSize(25);
+  textAlign(CENTER, CENTER);
+  text('Press ENTER to restart', x + 250, y + 180);
+}
+
+// function to create the game pause screen 
+function gamePause(){
+  fill('white');
+  rect(windowWidth/2 - 45, windowHeight/2 - 120, 50, 160)
+  rect(windowWidth/2 + 45, windowHeight/2 - 120, 50, 160)
+  textAlign(CENTER, CENTER);
+  textSize(40);
+  text("Enter to Play", windowWidth / 2 + 30, windowHeight / 2 + 90);
+}
+
+
+
+
+
+// --------------------------------------------------------------------------------------------------
+// ----------------------------------------PLAYER----------------------------------------------------
+// --------------------------------------------------------------------------------------------------
+
 // function to draw the playable character
-function drawPlayableCharacter(x, y, size) {
+function drawPlayer(x, y, size) {
   // width and height of the sprite
   let w = size;
   let h = size;
@@ -403,35 +468,6 @@ function drawPlayableCharacter(x, y, size) {
   rect(x + size * 3, y + size * 10, w, h);
 }
 
-
-// function to create bullets for the enemies to use
-function enemyBullet(x, y, speed) {
-  this.x = x;
-  this.y = y;
-  this.speed = speed;
-
-  // update bullet position based on its speed
-  this.update = function() {
-    this.x -= this.speed;
-  }
-
-  // display the bullet on the canvas
-  this.display = function() {
-    rect(this.x, this.y, 50, 10); 
-  }
-
-  // check for collision between the bullet and the player
-  this.checkCollision = function(x_pos, y_pos) {
-    // calculate distance between bullet and player's position
-    let distance = dist(this.x, this.y, x_pos, y_pos);
-    // if distance is less than a threshold, collision occurrs, and the player is killed
-    if (distance < 60) { 
-      return true;
-    }
-    return false;
-  }
-}
-
 // function to draw player lives
 function drawLives(x, y, size) {
   // width and height of the object
@@ -456,12 +492,12 @@ function drawLives(x, y, size) {
   rect(x + size * 3, y + size * 4, w, h);
 }
 
-
 // function to create bullets for the player
 function shootBullet() {
   // new bullet objects at the position of the character
   let bullet = new Bullet(gameChar_x + 120, gameChar_y + 18);
-  if (scrollPos_x <= 3500 || scrollPos_x >= 4000){
+  // stop shooting bullets when the boss is about to appear on the screen
+  if (scrollPos_x <= 5000 || scrollPos_x >= 6800){
     bullets.push(bullet);
   }
 }
@@ -475,7 +511,7 @@ function Bullet(x, y) {
   // method to move the bullet
   this.move = function () {
     // move the bullet horizontally in the direction it was shot
-    if (this.x < windowWidth - 50 && !gamewon) {
+    if (this.x < windowWidth - 50 && !won) {
       this.x += speed;
     }
   };
@@ -513,13 +549,59 @@ function Bullet(x, y) {
   };
 }
 
+// constructor function for drawing a shield around the player
+function drawShield(x, y, size) {
+  this.x = x;
+  this.y = y;
+  this.size = size;
+
+  // width and height of each shield element
+  let w = size + size / 4;
+  let h = size + size / 4;
+
+  // function to display the shield
+  this.display = function () {
+    rect(this.x - this.size * 3, this.y - this.size * 1.2, w, h);
+    rect(this.x - this.size * 0.2, this.y - this.size * 4, w, h);
+    rect(this.x + this.size * 3, this.y - this.size * 6.6, w, h);
+    rect(this.x + this.size * 5.8, this.y - this.size * 4, w, h);
+    rect(this.x + this.size * 8, this.y - this.size * 2.5, w, h);
+    rect(this.x + this.size * 11.5, this.y - this.size * 1.5, w, h);
+    rect(this.x + this.size * 15, this.y - this.size * 0.2, w, h);
+    rect(this.x + this.size * 17.3, this.y + this.size * 1.8, w, h);
+    rect(this.x - this.size*2, this.y + this.size * 1.5, w, h);
+    rect(this.x + this.size * 17.3, this.y + this.size * 4.2, w, h);
+    rect(this.x - this.size*2, this.y + this.size * 4.5, w, h);
+    rect(this.x - this.size * 3, this.y + this.size * 7, w, h);
+    rect(this.x + this.size * 5.8, this.y + this.size * 10, w, h);
+    rect(this.x + this.size * 8, this.y + this.size * 8, w, h);
+    rect(this.x + this.size * 11.5, this.y + this.size * 7.5, w, h);
+    rect(this.x + this.size * 15, this.y + this.size * 6, w, h);
+    rect(this.x - this.size * 0.2, this.y + this.size * 9.5, w, h);
+    rect(this.x + this.size * 3, this.y + this.size * 12.6, w, h);
+  }
+
+  // function to display the remaining shield count
+  this.count = function () {
+    textSize(30);
+    text("SHIELDS: " + shieldCount, fieldX + 400, fieldY + 45);
+  }
+}
+
+
+
+
+
+// --------------------------------------------------------------------------------------------------
+// ----------------------------------------ENEMIES---------------------------------------------------
+// --------------------------------------------------------------------------------------------------
 // function to draw an enemy ship
 function drawEnemy(x, y, size) {
   // enemy object properties
   this.x = x;
   this.y = y;
   this.size = size;
-  this.speed = 7;
+  this.speed = 8;
 
   // function to move the enemy towards the game character
   this.move = function (gc_x, gc_y) {
@@ -534,7 +616,7 @@ function drawEnemy(x, y, size) {
 
       // calculate velocity components based on angle and speed
       let vx = cos(angle) * this.speed * speedMultiplier;
-      let vy = sin(angle) * this.speed * speedMultiplier * 2;
+      let vy = sin(angle) * this.speed * speedMultiplier;
 
       // update enemy position
       this.x += vx;
@@ -641,269 +723,42 @@ function drawEnemy(x, y, size) {
   };
 }
 
-// constructor function for drawing a shield around the player
-function drawShield(x, y, size) {
+// function to create bullets for the enemies to use
+function enemyBullet(x, y, speed) {
   this.x = x;
   this.y = y;
-  this.size = size;
+  this.speed = speed;
 
-  // width and height of each shield element
-  let w = size + size / 4;
-  let h = size + size / 4;
-
-  // function to display the shield
-  this.display = function () {
-    rect(this.x - this.size * 3, this.y - this.size * 1.2, w, h);
-    rect(this.x - this.size * 0.2, this.y - this.size * 4, w, h);
-    rect(this.x + this.size * 3, this.y - this.size * 6.6, w, h);
-    rect(this.x + this.size * 5.8, this.y - this.size * 4, w, h);
-    rect(this.x + this.size * 8, this.y - this.size * 2.5, w, h);
-    rect(this.x + this.size * 11.5, this.y - this.size * 1.5, w, h);
-    rect(this.x + this.size * 15, this.y - this.size * 0.2, w, h);
-    rect(this.x + this.size * 17.3, this.y + this.size * 1.8, w, h);
-    rect(this.x - this.size*2, this.y + this.size * 1.5, w, h);
-    rect(this.x + this.size * 17.3, this.y + this.size * 4.2, w, h);
-    rect(this.x - this.size*2, this.y + this.size * 4.5, w, h);
-    rect(this.x - this.size * 3, this.y + this.size * 7, w, h);
-    rect(this.x + this.size * 5.8, this.y + this.size * 10, w, h);
-    rect(this.x + this.size * 8, this.y + this.size * 8, w, h);
-    rect(this.x + this.size * 11.5, this.y + this.size * 7.5, w, h);
-    rect(this.x + this.size * 15, this.y + this.size * 6, w, h);
-    rect(this.x - this.size * 0.2, this.y + this.size * 9.5, w, h);
-    rect(this.x + this.size * 3, this.y + this.size * 12.6, w, h);
+  // update bullet position based on its speed
+  this.update = function() {
+    this.x -= this.speed;
   }
 
-  // function to display the remaining shield count
-  this.count = function () {
-    textSize(30);
-    text("SHIELDS: " + shieldCount, fieldX + 500, fieldY + 45);
+  // display the bullet on the canvas
+  this.display = function() {
+    rect(this.x, this.y, 50, 10); 
   }
-}
 
-// constructor function for drawing various platform elements
-function drawPlatform() {
-  // function to draw a tree
-  this.drawTree = function (x) {
-    x -= scrollPos_x;
-    let size = 6;
-    let y = fieldH - (size * 15.5);
-    let w = 6;
-    let h = 6;
-
-    for (let i = 0; i < 18; i++) {
-      if (i >= 1 && i <= 16) {
-        rect(x, y + (i * size), w, h);
-      }
-
-      if ((i >= 0 && i <= 1) || (i >= 5 && i <= 6) || (i >= 10 && i <= 11)) {
-        rect(x + (size * 4), y + (size * i), w, h);
-        rect(x - (size * 4), y + (size * i), w, h);
-      }
-
-      if ((i >= 1 && i <= 2) || (i >= 6 && i <= 7) || (i >= 11 && i <= 12)) {
-        rect(x + (size * 3), y + (size * i), w, h);
-        rect(x - (size * 3), y + (size * i), w, h);
-      }
-
-      if ((i >= 2 && i <= 3) || (i >= 7 && i <= 8) || (i >= 12 && i <= 13)) {
-        rect(x + (size * 2), y + (size * i), w, h);
-        rect(x - (size * 2), y + (size * i), w, h);
-      }
-
-      if ((i >= 3 && i <= 4) || (i >= 8 && i <= 9) || (i >= 13 && i <= 14)) {
-        rect(x + (size * 1), y + (size * i), w, h);
-        rect(x - (size * 1), y + (size * i), w, h);
-      }
+  // check for collision between the bullet and the player
+  this.checkCollision = function(x_pos, y_pos) {
+    // calculate distance between bullet and player's position
+    let distance = dist(this.x, this.y, x_pos, y_pos);
+    // if distance is less than a threshold, collision occurrs, and the player is killed
+    if (distance < 60) { 
+      return true;
     }
-  }
-
-  // function to draw a flower
-  this.drawFlower = function (x) {
-    x -= scrollPos_x;
-    let w = 4;
-    let h = 4;
-    let size = 4;
-    let y = fieldH - (size * 6.7);
-
-    for (let i = 0; i < 11; i++) {
-      if (i >= 2 && i <= 8) {
-        rect(x, y + (i * size), w, h);
-      }
-
-      if (i >= 2 && i <= 4) {
-        rect(x + (size * 3), y + (i * size), w, h);
-        rect(x - (size * 3), y + (i * size), w, h);
-      }
-
-      if (i >= 3 && i <= 5) {
-        rect(x + (size * 2), y + (i * size), w, h);
-        rect(x - (size * 2), y + (i * size), w, h);
-      }
-
-      if (i >= 4 && i <= 5) {
-        rect(x + (size), y + (i * size), w, h);
-        rect(x - (size), y + (i * size), w, h);
-      }
-    }
-
-    rect(x + (size), y + (size * 7), w, h);
-    rect(x - (size), y + (size * 7), w, h);
-  }
-
-  // function to draw mountains
-  this.drawMountain = function(x){
-    x-=scrollPos_x
-    let size = 8;
-    let w = 8;
-    let h = 8;
-    let y = fieldH+1;
-
-    rect(x, y, w, h);
-    rect(x, y-size, w, h);
-    rect(x+size, y-size, w, h);
-    rect(x+size, y-(size*2), w, h);
-    rect(x+(size*2), y-(size*2), w, h);
-    rect(x+(size*2), y-(size*3), w, h);
-    rect(x+(size*3), y-(size*3), w, h);
-    rect(x+(size*3), y-(size*4), w, h);
-    rect(x+(size*4), y-(size*4), w, h);
-    rect(x+(size*4), y-(size*5), w, h);
-    rect(x+(size*4), y-(size*6), w, h);
-    rect(x+(size*5), y-(size*6), w, h);
-    rect(x+(size*5), y-(size*7), w, h);
-    rect(x+(size*6), y-(size*7), w, h);
-    rect(x+(size*7), y-(size*7), w, h);
-    rect(x+(size*7), y-(size*6), w, h);
-    rect(x+(size*7), y-(size*5), w, h);
-    rect(x+(size*8), y-(size*5), w, h);
-    rect(x+(size*9), y-(size*6), w, h);
-    rect(x+(size*10), y-(size*6), w, h);
-    rect(x+(size*10), y-(size*7), w, h);
-    rect(x+(size*9), y-(size*7), w, h);
-    rect(x+(size*8), y-(size*4), w, h);
-    rect(x+(size*9), y-(size*4), w, h);
-    rect(x+(size*9), y-(size*3), w, h);
-    rect(x+(size*9), y-(size*5), w, h);
-    rect(x+(size*10), y-(size*4), w, h);
-    rect(x+(size*10), y-(size*3), w, h);
-    rect(x+(size*10), y-(size*2), w, h);
-    rect(x+(size*10), y-(size), w, h);
-    rect(x+(size*11), y, w, h);
-    rect(x+(size*12), y, w, h);
-    rect(x+(size*12), y-(size), w, h);
-    rect(x+(size*11), y-(size), w, h);
-    rect(x+(size*11), y-(size*2), w, h);
-    rect(x+(size*11), y-(size), w, h);
-    rect(x+(size*10), y-(size*8), w, h);
-    rect(x+(size*11), y-(size*8), w, h);
-    rect(x+(size*11), y-(size*9), w, h);
-    rect(x+(size*11), y-(size*10), w, h);
-    rect(x+(size*12), y-(size*9), w, h);
-    rect(x+(size*12), y-(size*10), w, h);
-    rect(x+(size*13), y-(size*10), w, h);
-    rect(x+(size*14), y-(size*10), w, h);
-    rect(x+(size*12), y-(size*11), w, h);
-    rect(x+(size*13), y-(size*11), w, h);
-    rect(x+(size*14), y-(size*9), w, h);
-    rect(x+(size*14), y-(size*8), w, h);
-    rect(x+(size*15), y-(size*8), w, h);
-    rect(x+(size*15), y-(size*7), w, h);
-    rect(x+(size*15), y-(size*6), w, h);
-    rect(x+(size*16), y-(size*6), w, h);
-    rect(x+(size*16), y-(size*5), w, h);
-    rect(x+(size*17), y-(size*5), w, h);
-    rect(x+(size*17), y-(size*4), w, h);
-    rect(x+(size*18), y-(size*4), w, h);
-    rect(x+(size*18), y-(size*3), w, h);
-    rect(x+(size*19), y-(size*3), w, h);
-    rect(x+(size*19), y-(size*2), w, h);
-    rect(x+(size*20), y-(size*2), w, h);
-    rect(x+(size*20), y-(size), w, h);
-    rect(x+(size*21), y-(size), w, h);
-    rect(x+(size*20), y, w, h);
-    rect(x+(size*22), y, w, h);
-    rect(x+(size*21), y, w, h);
-  }
-
-   // function to draw a platform
-   this.platform = function (x, y, w, h) {
-    noStroke();
-    rect(x, y, w, h);
+    return false;
   }
 }
 
-// function to write pixelated game over phrase
-function gameOver() {
-  let x = windowWidth / 2;
-  let y = windowHeight / 3.5;
-  let size = 20;
 
-  // letter G
-  rect(x, y, size * 4, size);
-  rect(x - size, y + size, size, size * 4);
-  rect(x, y + size * 5, size * 4, size);
-  rect(x + size * 3, y + size * 3, size, size * 3);
-  rect(x + size, y + size * 3, size * 2, size);
 
-  // letter A
-  rect(x + 110, y + size, size, size * 5);
-  rect(x + 110 + size, y, size * 4, size);
-  rect(x + 110 + size * 4, y + size, size, size * 5);
-  rect(x + 110 + size, y + size * 3, size * 4, size);
 
-  // letter M
-  rect(x + 240, y, size, size * 6);
-  rect(x + 240 + size * 2, y + size * 2, size, size);
-  rect(x + 240 + size, y + size, size, size);
-  rect(x + 240 + size * 3, y + size * 3, size, size);
-  rect(x + 240 + size * 4, y + size * 2, size, size);
-  rect(x + 240 + size * 5, y + size, size, size);
-  rect(x + 240 + size * 6, y, size, size * 6);
 
-  // letter E
-  rect(x + 410, y, size + size * 4, size);
-  rect(x + 410, y + size * 5, size + size * 4, size);
-  rect(x + 410, y + size * 3, size + size * 4, size);
-  rect(x + 410, y, size, size + size * 4);
-
-  y = y + size * 8;
-
-  // letter O
-  rect(x - size, y, size + size * 3, size);
-  rect(x - size, y, size, size + size * 4);
-  rect(x, y + size * 5, size + size * 3, size);
-  rect(x + size * 3, y + size, size, size + size * 4);
-
-  // letter V
-  rect(x + 110, y, size, size + size * 2);
-  rect(x + 110 + size, y + size * 2, size, size);
-  rect(x + 110 + size, y + size * 4, size + size * 2, size);
-  rect(x + 110 + size, y + size * 3, size, size);
-  rect(x + 110 + size * 3, y + size * 3, size, size);
-  rect(x + 110 + size * 3, y + size * 2, size + size, size);
-  rect(x + 110 + size * 4, y, size, size + size * 2);
-  rect(x + 110 + size * 2, y + size * 5, size, size);
-
-  // letter E
-  rect(x + 255, y, size + size * 4, size);
-  rect(x + 255, y + size * 5, size + size * 4, size);
-  rect(x + 255, y + size * 3, size + size * 4, size);
-  rect(x + 255, y, size, size + size * 4);
-
-  // letter R
-  rect(x + 410, y, size, size + size * 5);
-  rect(x + 410, y, size + size * 3, size);
-  rect(x + 410, y + size * 3, size + size * 4, size);
-  rect(x + 410 + size * 4, y + size, size, size + size * 2);
-  rect(x + 410 + size * 3, y + size * 4, size, size);
-  rect(x + 410 + size * 4, y + size * 5, size, size);
-
-  // instruction for restarting the game
-  fill('white');
-  textSize(25);
-  text('Press ENTER to restart', x + 130, y + 180);
-}
-
+// --------------------------------------------------------------------------------------------------
+// --------------------------------------FINAL BOSS--------------------------------------------------
+// --------------------------------------------------------------------------------------------------
+// the final boss contructor 
 function finalBoss(x, y) {
   this.x = x;
   this.y = y;
@@ -1191,10 +1046,10 @@ function finalBoss(x, y) {
   this.shoot = function () {
     if (frameCount % 60 === 0) {
       // add a new enemy bullet to the bullets array
-      b.push(new enemyBullet(this.x - 60, this.y + 5, 15));
+      b.push(new enemyBullet(this.x - 60, this.y + 5, 10));
     }
     if (frameCount % 90 === 0) {
-      b.push(new enemyBullet(this.x - 60, this.y + 150, 15));
+      b.push(new enemyBullet(this.x - 60, this.y + 150, 10));
     }
 
     for (let i = b.length - 1; i >= 0; i--) {
@@ -1218,7 +1073,274 @@ function finalBoss(x, y) {
 }
 
 
-function startGame() {
+
+
+
+// --------------------------------------------------------------------------------------------------
+// --------------------------------------KEYBOARD CONTROLS-------------------------------------------
+// --------------------------------------------------------------------------------------------------
+let isShieldKeyPressed = false;
+
+// function to handle key press events
+function keyPressed() {
+  // check if the left arrow key or 'A' key is pressed
+  if (keyCode == 37 || keyCode == 65) {
+    isLeft = true;
+  }
+
+  // check if the right arrow key or 'D' key is pressed
+  if (keyCode == 39 || keyCode == 68) {
+    isRight = true;
+  }
+  // check if the 'Space' key is pressed for shooting
+  if (keyCode == 32 && !isPaused) {
+    isShoot = true;
+    if (!shootingInterval) {
+      shootBullet();
+      // interval for continuous shooting
+      shootingInterval = setInterval(shootBullet, 200);
+    }
+  }
+
+  // check if the 'S' key is pressed to activate shield
+  if ((keyCode == 83 && !shieldActive && shieldCount > 0)  && (isPaused == false)) {
+    shieldActive = true;
+    shieldStartTime = millis(); // record the time when the shield was activated
+    // set the position of the shield relative to the character
+    shieldX = gameChar_x; 
+    shieldY = gameChar_y;
+    // decrement shield count
+    shieldCount--;
+  }
+
+  // check if the 'Enter' key is pressed to start or restart the game
+  if (keyCode == 13) {
+    // if the game hasn't started yet, start the game
+    if (!gameStarted) {
+      gameStarted = true;
+    }
+    // if the game has ended or the player wants to restart, reset game state
+    else if (lives < 1 || won) {
+      // reset player lives, shield count, and boss hit count
+      lives = 3;
+      shieldCount = 3;
+      bossHitCount = 50;
+      // start the game again
+      gameStarted = false
+      startGame();
+      return; // exit the function
+    }
+
+    // if the game has been paused, then pressing 'Enter' will resume play
+    if (isPaused){
+      isPaused = false;
+    }
+  }
+
+  // if the 'Esc' key is pressed, then the player can pause the game
+  if (keyCode == 27 && !isPaused){
+    isPaused = true;
+  }
+}
+
+// function to handle key release events
+function keyReleased() {
+  // check if the left arrow key or 'A' key is released
+  if (keyCode == 37 || keyCode == 65) {
+    isLeft = false;
+  }
+  // check if the right arrow key or 'D' key is released
+  if (keyCode == 39 || keyCode == 68) {
+    isRight = false;
+  }
+  // check if the 'Space' key is released
+  if (keyCode == 32) {
+    isShoot = false;
+    // when spacebar is released, stop continuous shooting
+    clearInterval(shootingInterval);
+    shootingInterval = null; // reset shootingInterval variable
+  }
+  // check if the 'S' key is released
+  if (keyCode == 83) {
+    isShieldKeyPressed = false;
+  }
+}
+
+
+
+
+
+// --------------------------------------------------------------------------------------------------
+// --------------------FUNCTIONS TO DISPLAY SCORE AND CREATE THE PLATFORM----------------------------
+// --------------------------------------------------------------------------------------------------
+
+// function to draw the game won screen
+function displayScore() {
+  fill('white');
+  textSize(30);
+  text("Score: " + scoreCount, fieldX + 1200, fieldY + 45);
+}
+
+// constructor function for drawing various platform elements
+function drawPlatform() {
+  // function to draw a tree
+  this.drawTree = function (x) {
+    x -= scrollPos_x;
+    let size = 3;
+    let y = fieldH - (size * 7);
+    let w = 3;
+    let h = 3;
+
+    for (let i = 0; i < 18; i++) {
+      if (i >= 1 && i <= 16) {
+        rect(x, y + (i * size), w, h);
+      }
+
+      if ((i >= 0 && i <= 1) || (i >= 5 && i <= 6) || (i >= 10 && i <= 11)) {
+        rect(x + (size * 4), y + (size * i), w, h);
+        rect(x - (size * 4), y + (size * i), w, h);
+      }
+
+      if ((i >= 1 && i <= 2) || (i >= 6 && i <= 7) || (i >= 11 && i <= 12)) {
+        rect(x + (size * 3), y + (size * i), w, h);
+        rect(x - (size * 3), y + (size * i), w, h);
+      }
+
+      if ((i >= 2 && i <= 3) || (i >= 7 && i <= 8) || (i >= 12 && i <= 13)) {
+        rect(x + (size * 2), y + (size * i), w, h);
+        rect(x - (size * 2), y + (size * i), w, h);
+      }
+
+      if ((i >= 3 && i <= 4) || (i >= 8 && i <= 9) || (i >= 13 && i <= 14)) {
+        rect(x + (size * 1), y + (size * i), w, h);
+        rect(x - (size * 1), y + (size * i), w, h);
+      }
+    }
+  }
+
+  // function to draw a flower
+  this.drawFlower = function (x) {
+    x -= scrollPos_x;
+    let w = 3;
+    let h = 3;
+    let size = 3;
+    let y = fieldH + 2;
+
+    for (let i = 0; i < 11; i++) {
+      if (i >= 2 && i <= 8) {
+        rect(x, y + (i * size), w, h);
+      }
+
+      if (i >= 2 && i <= 4) {
+        rect(x + (size * 3), y + (i * size), w, h);
+        rect(x - (size * 3), y + (i * size), w, h);
+      }
+
+      if (i >= 3 && i <= 5) {
+        rect(x + (size * 2), y + (i * size), w, h);
+        rect(x - (size * 2), y + (i * size), w, h);
+      }
+
+      if (i >= 4 && i <= 5) {
+        rect(x + (size), y + (i * size), w, h);
+        rect(x - (size), y + (i * size), w, h);
+      }
+    }
+
+    rect(x + (size), y + (size * 7), w, h);
+    rect(x - (size), y + (size * 7), w, h);
+  }
+
+  // function to draw mountains
+  this.drawMountain = function(x){
+    x-=scrollPos_x
+    let size = 6;
+    let w = 5;
+    let h = 5;
+    let y = fieldH + 24;
+
+    rect(x, y, w, h);
+    rect(x, y-size, w, h);
+    rect(x+size, y-size, w, h);
+    rect(x+size, y-(size*2), w, h);
+    rect(x+(size*2), y-(size*2), w, h);
+    rect(x+(size*2), y-(size*3), w, h);
+    rect(x+(size*3), y-(size*3), w, h);
+    rect(x+(size*3), y-(size*4), w, h);
+    rect(x+(size*4), y-(size*4), w, h);
+    rect(x+(size*4), y-(size*5), w, h);
+    rect(x+(size*4), y-(size*6), w, h);
+    rect(x+(size*5), y-(size*6), w, h);
+    rect(x+(size*5), y-(size*7), w, h);
+    rect(x+(size*6), y-(size*7), w, h);
+    rect(x+(size*7), y-(size*7), w, h);
+    rect(x+(size*7), y-(size*6), w, h);
+    rect(x+(size*7), y-(size*5), w, h);
+    rect(x+(size*8), y-(size*5), w, h);
+    rect(x+(size*9), y-(size*6), w, h);
+    rect(x+(size*10), y-(size*6), w, h);
+    rect(x+(size*10), y-(size*7), w, h);
+    rect(x+(size*9), y-(size*7), w, h);
+    rect(x+(size*8), y-(size*4), w, h);
+    rect(x+(size*9), y-(size*4), w, h);
+    rect(x+(size*9), y-(size*3), w, h);
+    rect(x+(size*9), y-(size*5), w, h);
+    rect(x+(size*10), y-(size*4), w, h);
+    rect(x+(size*10), y-(size*3), w, h);
+    rect(x+(size*10), y-(size*2), w, h);
+    rect(x+(size*10), y-(size), w, h);
+    rect(x+(size*11), y, w, h);
+    rect(x+(size*12), y, w, h);
+    rect(x+(size*12), y-(size), w, h);
+    rect(x+(size*11), y-(size), w, h);
+    rect(x+(size*11), y-(size*2), w, h);
+    rect(x+(size*11), y-(size), w, h);
+    rect(x+(size*10), y-(size*8), w, h);
+    rect(x+(size*11), y-(size*8), w, h);
+    rect(x+(size*11), y-(size*9), w, h);
+    rect(x+(size*11), y-(size*10), w, h);
+    rect(x+(size*12), y-(size*9), w, h);
+    rect(x+(size*12), y-(size*10), w, h);
+    rect(x+(size*13), y-(size*10), w, h);
+    rect(x+(size*14), y-(size*10), w, h);
+    rect(x+(size*12), y-(size*11), w, h);
+    rect(x+(size*13), y-(size*11), w, h);
+    rect(x+(size*14), y-(size*9), w, h);
+    rect(x+(size*14), y-(size*8), w, h);
+    rect(x+(size*15), y-(size*8), w, h);
+    rect(x+(size*15), y-(size*7), w, h);
+    rect(x+(size*15), y-(size*6), w, h);
+    rect(x+(size*16), y-(size*6), w, h);
+    rect(x+(size*16), y-(size*5), w, h);
+    rect(x+(size*17), y-(size*5), w, h);
+    rect(x+(size*17), y-(size*4), w, h);
+    rect(x+(size*18), y-(size*4), w, h);
+    rect(x+(size*18), y-(size*3), w, h);
+    rect(x+(size*19), y-(size*3), w, h);
+    rect(x+(size*19), y-(size*2), w, h);
+    rect(x+(size*20), y-(size*2), w, h);
+    rect(x+(size*20), y-(size), w, h);
+    rect(x+(size*21), y-(size), w, h);
+    rect(x+(size*20), y, w, h);
+    rect(x+(size*22), y, w, h);
+    rect(x+(size*21), y, w, h);
+  }
+
+   // function to draw a platform
+   this.platform = function (x, y, w, h) {
+    noStroke();
+    rect(x, y, w, h);
+  }
+}
+
+
+
+
+
+// --------------------------------------------------------------------------------------------------
+// --------------------------------------STARTGMAE FUNCTION------------------------------------------
+// --------------------------------------------------------------------------------------------------
+function startGame() {  
   enemies = []; // array to store enemy objects
   enemyCoords = []; // array to store enemy coordinates
   bullets = []; // array to store bullets
@@ -1227,27 +1349,32 @@ function startGame() {
   flowers = []; // array to store flower positions
   mountains = []; // array to store mountain positions
 
+  scoreCount = 0;
+  bossHitCount = 50;
+
   // reset game character position
   gameChar_x = -200;
   gameChar_y = ((windowHeight / 7) + (windowHeight - (windowHeight / 7) * 2)) / 2;
 
   // reset background scroll position
   scrollPos_x = 0;
+  scrollPos_x_BG = 0;
 
   // reset game character movement variables
   isLeft = false;
   isRight = false;
-  gamewon = false;
+  won = false;
+  isPaused = false;
 
   // number of additional enemies to add
-  let numAdditionalEnemies = 10; 
+  let numAdditionalEnemies = 17; 
   
   // loop to add additional enemies
   for (let i = 0; i < numAdditionalEnemies; i++) {
     let newXPos = windowWidth + (i + 1) * 500; 
     
     // generate a random y_pos value within a range
-    let newYPos = random(fieldY, fieldY + fieldH - 400) * 2;
+    let newYPos = random(fieldY, fieldY + fieldH - 400) * 2.5;
     
     // push a new object with the calculated x_pos and y_pos values into enemyCoords
     enemyCoords.push({
@@ -1272,5 +1399,3 @@ function startGame() {
   // the final boss object
   boss = new finalBoss(windowWidth + 50, 90);
 }
-
-
